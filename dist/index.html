@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Контур — демонстрационный MVP защищённой корпоративной среды с клиентским шифрованием." />
+    <meta name="theme-color" content="#111816" />
+    <title>Контур — защищённая корпоративная среда</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar">
+        <a class="brand" href="#overview" aria-label="Контур — главная">
+          <span class="brand-mark" aria-hidden="true"><span></span></span>
+          <span class="brand-copy"><strong>Контур</strong><small>secure workspace</small></span>
+        </a>
+
+        <button class="org-switcher" id="org-switcher" type="button" aria-label="Текущая организация">
+          <span class="org-monogram">AI</span>
+          <span class="org-switcher-copy"><small>ОРГАНИЗАЦИЯ</small><strong>Astana Industrial</strong></span>
+          <span class="chevron">⌄</span>
+        </button>
+
+        <nav class="primary-nav" aria-label="Основная навигация">
+          <button class="nav-item active" data-view="overview" type="button"><span data-icon="grid"></span><span>Обзор</span></button>
+          <button class="nav-item" data-view="chats" type="button"><span data-icon="message"></span><span>Сообщения</span><span class="nav-count">3</span></button>
+          <button class="nav-item" data-view="documents" type="button"><span data-icon="file"></span><span>Документы</span></button>
+          <button class="nav-item" data-view="team" type="button"><span data-icon="users"></span><span>Сотрудники</span></button>
+          <button class="nav-item" data-view="access" type="button"><span data-icon="key"></span><span>Доступы</span></button>
+          <button class="nav-item" data-view="audit" type="button"><span data-icon="activity"></span><span>Журнал аудита</span></button>
+        </nav>
+
+        <div class="sidebar-section-label">БЕЗОПАСНОСТЬ</div>
+        <nav class="primary-nav security-nav" aria-label="Безопасность">
+          <button class="nav-item" data-view="crypto" type="button"><span data-icon="shield"></span><span>Криптоконтур</span><i class="status-dot"></i></button>
+          <button class="nav-item" data-action="server-view" type="button"><span data-icon="database"></span><span>Взгляд сервера</span></button>
+        </nav>
+
+        <div class="sidebar-foot">
+          <div class="license-card">
+            <span class="license-icon" data-icon="badge"></span>
+            <div><strong>Enterprise Pilot</strong><small>Лицензия активна до 31.12.2026</small></div>
+          </div>
+          <button class="profile-card" type="button" data-view="team">
+            <span class="avatar avatar-photo">АД</span>
+            <span><strong>Алия Даулетова</strong><small>Администратор</small></span>
+            <span class="more">•••</span>
+          </button>
+        </div>
+      </aside>
+
+      <section class="workspace">
+        <header class="topbar">
+          <button class="icon-button mobile-menu" id="mobile-menu" type="button" aria-label="Открыть меню"><span data-icon="menu"></span></button>
+          <div class="topbar-context">
+            <span class="eyebrow">РАБОЧАЯ ОБЛАСТЬ</span>
+            <strong id="page-context">Обзор</strong>
+          </div>
+          <button class="command-search" id="command-search" type="button">
+            <span data-icon="search"></span><span>Поиск по рабочей области</span><kbd>⌘ K</kbd>
+          </button>
+          <div class="topbar-actions">
+            <button class="privacy-pill" id="vault-button" type="button"><i></i><span id="vault-label">Контур заблокирован</span><span data-icon="lock"></span></button>
+            <button class="icon-button" id="notifications-button" type="button" aria-label="Уведомления"><span data-icon="bell"></span><i class="notification-dot"></i></button>
+            <span class="top-avatar">АД</span>
+          </div>
+        </header>
+
+        <main class="content" id="main-content" tabindex="-1"></main>
+      </section>
+    </div>
+
+    <div class="modal-layer" id="modal-layer" aria-live="polite"></div>
+    <div class="toast-region" id="toast-region" aria-live="polite"></div>
+    <div class="mobile-backdrop" id="mobile-backdrop"></div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
