@@ -1,0 +1,25 @@
+{
+  "name": "@kontur/crypto-client",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run src/crypto.test.ts"
+  },
+  "dependencies": {
+    "@simplewebauthn/browser": "^13.2.2",
+    "hash-wasm": "^4.12.0",
+    "libsodium-wrappers-sumo": "0.7.15",
+    "docx-preview": "^0.3.6",
+    "read-excel-file": "^5.8.0",
+    "shamir-secret-sharing": "^0.0.4",
+    "socket.io-client": "^4.8.1",
+    "yjs": "^13.6.20"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0"
+  }
+}

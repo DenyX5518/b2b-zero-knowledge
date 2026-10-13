@@ -1,0 +1,10 @@
+node_modules/
+coverage/
+.env
+*.log
+*.tar.gz
+.site-package-stage/
+.sites-runtime/
+apps/*/dist/
+packages/*/dist/
+runtime-data/

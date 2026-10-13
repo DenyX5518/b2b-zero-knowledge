@@ -1,6 +1,24 @@
+import {
+  connectRealtime,
+  createOfficePreview,
+  createRecoveryShares,
+  decryptFile,
+  decryptXChaCha20,
+  deriveUnlockKey,
+  encryptFile,
+  encryptXChaCha20,
+  fromBase64,
+  generateContentKey,
+  recoverSecret,
+  startAuthentication,
+  startRegistration,
+  toBase64
+} from "./secure-runtime.js";
+
 const ORG_ID = "astana-industrial-01";
 const DEMO_PASSPHRASE = "demo-2026";
-const STORAGE_PREFIX = `kontur:v1:${ORG_ID}`;
+const STORAGE_PREFIX = `kontur:v2:${ORG_ID}`;
+const API_ORIGIN = "http://127.0.0.1:3001";
 
 const icons = {
   grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
@@ -74,12 +92,20 @@ const state = {
   view: location.hash.replace("#", "") || "overview",
   unlocked: false,
   key: null,
+  rootKeyBytes: null,
+  recoveryShares: [],
   messages: [],
   documents: [],
   audit: [],
   selectedRoom: "board",
   recoveryApprovals: new Set(),
-  activeRole: "Руководитель"
+  activeRole: "Руководитель",
+  backendStatus: "unknown",
+  backendSession: null,
+  backendRoomId: null,
+  realtime: null,
+  realtimeState: "offline",
+  activeObjectUrl: null
 };
 
 const defaultMessages = [
@@ -122,9 +148,11 @@ function base64ToBytes(value) {
 
 async function deriveVaultKey(passphrase) {
   const encoder = new TextEncoder();
-  const baseKey = await crypto.subtle.importKey("raw", encoder.encode(passphrase), "PBKDF2", false, ["deriveKey"]);
-  const salt = await crypto.subtle.digest("SHA-256", encoder.encode(`kontur-demo-salt:${ORG_ID}`));
-  return crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: 210000, hash: "SHA-256" }, baseKey, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+  const salt = new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(`kontur-argon2id-salt:${ORG_ID}`)));
+  const rootKeyBytes = await deriveUnlockKey(passphrase, salt);
+  state.rootKeyBytes = rootKeyBytes;
+  state.recoveryShares = await createRecoveryShares(rootKeyBytes, 3, 2);
+  return crypto.subtle.importKey("raw", rootKeyBytes, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
 }
 
 async function encryptPayload(payload) {
@@ -195,19 +223,30 @@ async function unlockVault(passphrase) {
     state.audit = storedAudit ? JSON.parse(storedAudit) : [];
     await seedAudit();
     state.unlocked = true;
+    if (state.backendSession) await connectBackendRealtime().catch(() => undefined);
     updateVaultUI();
     closeModal();
     render();
     toast("Контур разблокирован", "Ключ получен локально и останется только в памяти этой вкладки.");
   } catch (error) {
+    console.error("Vault unlock failed", error);
+    state.rootKeyBytes?.fill(0);
+    state.rootKeyBytes = null;
+    state.recoveryShares = [];
     state.key = null;
     const errorNode = document.getElementById("unlock-error");
-    if (errorNode) errorNode.textContent = "Не удалось открыть vault. Проверьте кодовую фразу.";
+    if (errorNode) errorNode.textContent = `Не удалось открыть vault: ${error instanceof Error ? error.message : "неизвестная ошибка"}`;
   }
 }
 
 function lockVault() {
+  state.realtime?.disconnect();
+  state.realtime = null;
+  state.realtimeState = "offline";
   state.key = null;
+  state.rootKeyBytes?.fill(0);
+  state.rootKeyBytes = null;
+  state.recoveryShares = [];
   state.unlocked = false;
   state.messages = [];
   state.documents = [];
@@ -292,7 +331,7 @@ function renderChats() {
       <aside class="chat-list"><div class="chat-list-head"><div class="chat-list-head-row"><h2>Комнаты</h2><button class="round-add" data-action="new-room" type="button" aria-label="Новая комната">+</button></div><label class="chat-filter">${icon("search")}<input id="room-search" type="search" placeholder="Найти комнату" /></label></div>
         <div class="room-list">${rooms.map((room) => `<button class="room-item ${room.id === activeRoom.id ? "active" : ""}" data-room="${room.id}" type="button"><span class="room-avatar ${room.private ? "private" : ""}">${room.initials}</span><span class="room-copy"><strong>${room.name}</strong><small>${room.preview}</small></span><span class="room-meta"><time>${room.time}</time>${room.unread ? `<b class="unread">${room.unread}</b>` : ""}</span></button>`).join("")}</div>
       </aside>
-      <section class="chat-main"><header class="chat-main-head"><div class="chat-title"><span class="room-avatar">${activeRoom.initials}</span><span><strong>${activeRoom.name}</strong><small>${activeRoom.members} участников · защищённая комната</small></span></div><div class="chat-head-actions"><button class="icon-button" data-action="demo-call" aria-label="Аудиозвонок">${icon("phone")}</button><button class="icon-button" data-action="demo-call" aria-label="Видеозвонок">${icon("video")}</button><button class="icon-button" data-action="room-info" aria-label="Информация">${icon("info")}</button></div></header>
+      <section class="chat-main"><header class="chat-main-head"><div class="chat-title"><span class="room-avatar">${activeRoom.initials}</span><span><strong>${activeRoom.name}</strong><small>${activeRoom.members} участников · защищённая комната · realtime: ${state.realtimeState}</small></span></div><div class="chat-head-actions"><button class="icon-button" data-action="demo-call" aria-label="Аудиозвонок">${icon("phone")}</button><button class="icon-button" data-action="demo-call" aria-label="Видеозвонок">${icon("video")}</button><button class="icon-button" data-action="room-info" aria-label="Информация">${icon("info")}</button></div></header>
         <div class="message-scroll" id="message-scroll"><div class="date-separator">Сегодня</div>${messages.length ? messages.map(messageTemplate).join("") : '<div class="empty-state">В этой комнате пока нет сообщений.</div>'}</div>
         <form class="composer" id="message-form"><button class="icon-button" data-action="attachment" type="button" aria-label="Прикрепить файл">${icon("paperclip")}</button><textarea id="message-input" rows="1" maxlength="2000" placeholder="Напишите защищённое сообщение…" aria-label="Текст сообщения"></textarea><button class="send-button" type="submit" aria-label="Отправить">${icon("send")}</button></form>
       </section>
@@ -367,16 +406,40 @@ function renderCrypto() {
       <div class="key-branch"><div class="key-node"><span class="key-node-icon">${icon("shield")}</span><span><strong>Organization KEK</strong><small>Упаковывает ключи доменов</small></span><span class="key-state">активен</span></div><div class="key-node"><span class="key-node-icon">${icon("message")}</span><span><strong>Room keys · 32</strong><small>Отдельный ключ на комнату</small></span><span class="key-state">epoch 12</span></div><div class="key-node"><span class="key-node-icon">${icon("file")}</span><span><strong>Document keys · 143</strong><small>DEK на каждую версию</small></span><span class="key-state">envelope</span></div><div class="key-node"><span class="key-node-icon">${icon("fingerprint")}</span><span><strong>Device envelopes · 247</strong><small>X25519 на доверенное устройство</small></span><span class="key-state">bound</span></div></div>
     </article>
     <article class="recovery-card"><h2>Восстановление 2 из 3</h2><p>Один участник не может восстановить критический ключ самостоятельно. Выберите двух держателей для демонстрации.</p><div class="holder-list">${holders.map(([id,initials,name,role]) => { const isApproved = state.recoveryApprovals.has(id); return `<div class="holder ${isApproved ? "approved" : ""}"><span class="avatar">${initials}</span><span><strong>${name}</strong><small>${role}</small></span><button class="button small ${isApproved ? "primary" : ""}" data-holder="${id}" ${approved >= 2 && !isApproved ? "disabled" : ""}>${isApproved ? "Share получен" : "Запросить"}</button></div>`; }).join("")}</div>
-      <div class="approval-box ${approved >= 2 ? "ready" : ""}"><strong>${approved >= 2 ? "Кворум достигнут" : `Получено подтверждений: ${approved} из 2`}</strong><div class="progress-line"><span class="${approved >= 2 ? "full" : approved === 1 ? "half" : ""}"></span></div>${approved >= 2 ? `<p>В production shares объединяются только на изолированном доверенном устройстве.</p><button class="button small primary" data-action="recover-demo">Запустить recovery drill</button>` : ""}</div>
-      <div class="security-note">${icon("warning")}<span>В этом MVP recovery — продуктовая симуляция. Реальный Shamir Secret Sharing требует audited library, защищённых holder devices и церемонии выдачи shares.</span></div>
+      <div class="approval-box ${approved >= 2 ? "ready" : ""}"><strong>${approved >= 2 ? "Кворум достигнут" : `Получено подтверждений: ${approved} из 2`}</strong><div class="progress-line"><span class="${approved >= 2 ? "full" : approved === 1 ? "half" : ""}"></span></div>${approved >= 2 ? `<p>Shares объединяются только в памяти этой доверенной вкладки и затем обнуляются.</p><button class="button small primary" data-action="recover-demo">Проверить восстановление ключа</button>` : ""}</div>
+      <div class="security-note">${icon("info")}<span>Это реальное пороговое разделение Shamir 2‑из‑3. В пилоте каждый share должен быть зашифрован на отдельное доверенное устройство держателя; backend координирует церемонию, но не получает открытые shares.</span></div>
     </article></section>
   </div>`;
 }
 
+function renderInfrastructure() {
+  const status = state.backendStatus;
+  const statusLabel = status === "ready" ? "Контур запущен" : status === "down" ? "Backend недоступен" : "Не проверен";
+  const statusClass = status === "ready" ? "ready" : status === "down" ? "down" : "idle";
+  const services = [
+    ["NestJS API", "REST + Socket.IO", "Авторизация, tenancy, policy enforcement и координация ciphertext."],
+    ["PostgreSQL 17", "RLS / tenant_id", "Метаданные и зашифрованные envelopes с tenant isolation."],
+    ["Redis 8", "Rate limit / presence", "WebSocket presence, одноразовые challenge и сессии."],
+    ["MinIO", "Encrypted objects", "Chunked XChaCha20‑Poly1305 blobs; plaintext не покидает клиент."],
+    ["WebAuthn + OIDC", "Passwordless / SSO", "Passkeys, корпоративный IdP и ротация refresh-token families."],
+    ["PKCS#11 HSM", "Audit signatures", "Аппаратная подпись audit anchors; software signer только для dev."],
+    ["Yjs CRDT", "Encrypted updates", "Совместное редактирование через непрозрачные для сервера updates."],
+    ["OnlyOffice bridge", "On-prem trusted mode", "Опциональный редактор внутри периметра компании; явно не zero-knowledge для редактора."]
+  ];
+  const sessionActions = state.backendSession
+    ? `<button class="button" data-action="enroll-passkey">${icon("fingerprint")} Новый passkey</button><button class="button" data-action="rotate-session">${icon("rotate")} Ротировать token</button><button class="button" data-action="logout-backend">Выйти</button>`
+    : `<button class="button" data-action="passkey-login" ${status !== "ready" ? "disabled" : ""}>${icon("fingerprint")} Passkey login</button><button class="button" data-action="login-backend" ${status !== "ready" ? "disabled" : ""}>Demo login</button>`;
+  return `<div class="view">${pageHeading("PILOT FOUNDATION", "Инфраструктурный контур", "Запускаемый backend и сервисы для реальной многопользовательской синхронизации.", `${sessionActions}<button class="button primary" data-action="check-backend">${icon("activity")} Проверить backend</button>`)}
+    <div class="runtime-banner ${statusClass}"><span class="runtime-dot"></span><div><strong>${statusLabel}</strong><small>${status === "ready" ? "PostgreSQL и Redis ответили readiness-check." : `Локальная точка проверки: ${API_ORIGIN}/api/v1/health/ready`}</small></div></div>
+    <section class="infra-grid">${services.map(([name, mode, description]) => `<article class="service-card"><div class="service-icon">${icon(name.includes("MinIO") || name.includes("PostgreSQL") || name.includes("Redis") ? "database" : name.includes("WebAuthn") ? "fingerprint" : name.includes("HSM") ? "key" : "cpu")}</div><div><small>${mode}</small><h2>${name}</h2><p>${description}</p></div><span class="service-state">implemented</span></article>`).join("")}</section>
+    <div class="security-note">${icon("info")}<span>Статический приватный стенд работает автономно. Полный контур запускается локально командой <code>npm run infra:up</code>; IdP, аппаратный HSM и trusted OnlyOffice подключаются конфигурацией конкретной организации.${state.backendSession ? " Demo-сессия активна; access token хранится только в памяти вкладки." : ""}</span></div>
+  </div>`;
+}
+
 function render() {
-  const titles = { overview: "Обзор", chats: "Сообщения", documents: "Документы", team: "Сотрудники", access: "Доступы", audit: "Журнал аудита", crypto: "Криптоконтур" };
+  const titles = { overview: "Обзор", chats: "Сообщения", documents: "Документы", team: "Сотрудники", access: "Доступы", audit: "Журнал аудита", crypto: "Криптоконтур", infrastructure: "Инфраструктура" };
   if (!titles[state.view]) state.view = "overview";
-  const renderers = { overview: renderOverview, chats: renderChats, documents: renderDocuments, team: renderTeam, access: renderAccess, audit: renderAudit, crypto: renderCrypto };
+  const renderers = { overview: renderOverview, chats: renderChats, documents: renderDocuments, team: renderTeam, access: renderAccess, audit: renderAudit, crypto: renderCrypto, infrastructure: renderInfrastructure };
   main.innerHTML = renderers[state.view]();
   document.getElementById("page-context").textContent = titles[state.view];
   document.querySelectorAll(".nav-item[data-view]").forEach((button) => button.classList.toggle("active", button.dataset.view === state.view));
@@ -393,12 +456,14 @@ function openModal(content, wide = false) {
 }
 
 function closeModal() {
+  if (state.activeObjectUrl) URL.revokeObjectURL(state.activeObjectUrl);
+  state.activeObjectUrl = null;
   modalLayer.innerHTML = "";
 }
 
 function openUnlockModal() {
   if (state.unlocked) return lockVault();
-  openModal(`<div class="modal-body"><div class="unlock-visual">${icon("lock")}</div><div class="unlock-copy"><div class="eyebrow-label">ЛОКАЛЬНЫЙ VAULT</div><h3>Разблокировать контур</h3><p>Ключ будет выведен из кодовой фразы внутри браузера. В сеть он не отправляется и хранится только в памяти вкладки.</p></div><form id="unlock-form"><div class="field"><label for="passphrase">Кодовая фраза организации</label><input id="passphrase" type="password" value="${DEMO_PASSPHRASE}" autocomplete="off" /></div><div class="demo-hint">Для MVP используйте <code>${DEMO_PASSPHRASE}</code></div><div id="unlock-error" class="result-denied" style="margin-top:9px"></div><div class="unlock-warning">${icon("warning")}<span>Демонстрационная фраза публична. Не используйте MVP для реальных конфиденциальных данных.</span></div><button class="button primary" style="width:100%;margin-top:17px" type="submit">${icon("unlock")} Открыть рабочую область</button></form></div>`);
+  openModal(`<div class="modal-body"><div class="unlock-visual">${icon("lock")}</div><div class="unlock-copy"><div class="eyebrow-label">ЛОКАЛЬНЫЙ VAULT</div><h3>Разблокировать контур</h3><p>32‑байтный ключ выводится Argon2id (64 MiB, 3 прохода) внутри браузера. В сеть он не отправляется и хранится только в памяти вкладки.</p></div><form id="unlock-form"><div class="field"><label for="passphrase">Кодовая фраза организации</label><input id="passphrase" type="password" value="${DEMO_PASSPHRASE}" autocomplete="off" /></div><div class="demo-hint">Для MVP используйте <code>${DEMO_PASSPHRASE}</code>; вычисление может занять несколько секунд.</div><div id="unlock-error" class="result-denied" style="margin-top:9px"></div><div class="unlock-warning">${icon("warning")}<span>Демонстрационная фраза публична. Реальный пилот требует аппаратного ключа/WebAuthn и уникального секрета организации.</span></div><button class="button primary" style="width:100%;margin-top:17px" type="submit">${icon("unlock")} Вывести ключ Argon2id</button></form></div>`);
 }
 
 function openServerView() {
@@ -408,19 +473,49 @@ function openServerView() {
   openModal(`<header class="modal-head"><div><h2>Что видит инфраструктура</h2><p>Реальный объект из localStorage этого MVP. Ключа и plaintext здесь нет.</p></div><button class="modal-close" data-action="close-modal">${icon("close")}</button></header><div class="modal-body"><div class="cipher-view">${escapeHTML(visible)}</div><div class="server-facts"><div class="server-fact"><small>Payload</small><strong>Ciphertext</strong></div><div class="server-fact"><small>Алгоритм MVP</small><strong>AES-256-GCM</strong></div><div class="server-fact"><small>Ключ</small><strong>Только в RAM клиента</strong></div></div><div class="security-note">${icon("info")}<span>Провайдер всё ещё видит ограниченные служебные метаданные: tenant ID, размер объекта, время и сетевые сведения. Production-архитектура минимизирует их, но не обещает анонимность.</span></div></div><footer class="modal-actions"><button class="button" data-action="close-modal">Закрыть</button></footer>`);
 }
 
-function openDocument(docId) {
+function sanitizeOfficeHTML(html) {
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  parsed.querySelectorAll("script,style,iframe,object,embed,link,meta").forEach((node) => node.remove());
+  parsed.querySelectorAll("*").forEach((node) => [...node.attributes].forEach((attribute) => {
+    if (attribute.name.startsWith("on") || attribute.name === "style" || ["src", "href"].includes(attribute.name)) node.removeAttribute(attribute.name);
+  }));
+  return parsed.body.innerHTML;
+}
+
+function renderOfficePreview(preview) {
+  if (preview.kind === "pdf") {
+    state.activeObjectUrl = preview.objectUrl;
+    return `<iframe class="pdf-frame" src="${preview.objectUrl}#toolbar=0&navpanes=0" title="Защищённый PDF viewer"></iframe>`;
+  }
+  if (preview.kind === "docx") return `<div class="office-docx">${sanitizeOfficeHTML(preview.html)}</div>`;
+  if (preview.kind === "xlsx") return `<div class="sheet-preview"><table>${preview.rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHTML(cell instanceof Date ? cell.toLocaleDateString("ru-RU") : cell ?? "")}</td>`).join("")}</tr>`).join("")}</table></div>`;
+  return `<div class="empty-state">${escapeHTML(preview.reason)}</div>`;
+}
+
+async function openDocument(docId) {
   const doc = state.documents.find((item) => item.id === docId);
   if (!doc) return;
-  openModal(`<header class="modal-head"><div><h2>${escapeHTML(doc.title)}</h2><p>Версия ${doc.version} · расшифровано локально · download=false · print=false</p></div><button class="modal-close" data-action="close-modal">${icon("close")}</button></header><div class="modal-body"><div class="doc-editor-meta"><span class="status-pill ${doc.statusTone}">${escapeHTML(doc.status)}</span><span class="classification"><i class="${doc.classificationTone}"></i>${escapeHTML(doc.classification)}</span><span class="status-pill green">${icon("shield")} локальная расшифровка</span></div><div class="editor-canvas"><div class="editor-page"><textarea id="document-content" ${doc.canEdit ? "" : "readonly"}>${escapeHTML(doc.content)}</textarea></div></div></div><footer class="modal-actions"><button class="button" data-action="close-modal">Закрыть</button>${doc.canEdit ? `<button class="button primary" data-action="save-document" data-id="${doc.id}">${icon("lock")} Зашифровать и сохранить</button>` : `<span class="status-pill gray">Только просмотр</span>`}</footer>`, true);
+  let viewer = `<div class="editor-canvas"><div class="editor-page"><textarea id="document-content" ${doc.canEdit ? "" : "readonly"}>${escapeHTML(doc.content)}</textarea></div></div>`;
+  if (doc.fileManifest && doc.fileKey) {
+    try {
+      const decrypted = await decryptFile(doc.fileManifest, fromBase64(doc.fileKey));
+      const file = new File([decrypted.blob], decrypted.name, { type: decrypted.blob.type });
+      viewer = `<div class="protected-viewer" data-watermark="Алия Даулетова · ${new Date().toLocaleString("ru-RU")}">${renderOfficePreview(await createOfficePreview(file))}</div>`;
+    } catch {
+      viewer = `<div class="empty-state result-denied">Файл не прошёл локальную расшифровку или проверку AEAD.</div>`;
+    }
+  }
+  openModal(`<header class="modal-head"><div><h2>${escapeHTML(doc.title)}</h2><p>Версия ${doc.version} · расшифровано локально · download=false · print=false</p></div><button class="modal-close" data-action="close-modal">${icon("close")}</button></header><div class="modal-body"><div class="doc-editor-meta"><span class="status-pill ${doc.statusTone}">${escapeHTML(doc.status)}</span><span class="classification"><i class="${doc.classificationTone}"></i>${escapeHTML(doc.classification)}</span><span class="status-pill green">${icon("shield")} XChaCha20‑Poly1305</span><span class="status-pill gray">watermark + print block</span></div>${viewer}</div><footer class="modal-actions"><button class="button" data-action="close-modal">Закрыть</button>${doc.canEdit && !doc.fileManifest ? `<button class="button primary" data-action="save-document" data-id="${doc.id}">${icon("lock")} Зашифровать и сохранить</button>` : `<span class="status-pill gray">Защищённый просмотр</span>`}</footer>`, true);
+  modalLayer.querySelector(".protected-viewer")?.addEventListener("contextmenu", (event) => event.preventDefault());
   appendAudit("Документ открыт", doc.title).then(() => { if (state.view === "audit") render(); });
 }
 
 function openNewDocument() {
-  openModal(`<header class="modal-head"><div><h2>Новый защищённый документ</h2><p>Содержимое будет зашифровано до сохранения.</p></div><button class="modal-close" data-action="close-modal">${icon("close")}</button></header><form id="new-document-form"><div class="modal-body"><div class="field"><label for="new-document-title">Название</label><input id="new-document-title" maxlength="120" required placeholder="Например, служебная записка" /></div><div class="field"><label for="new-document-content">Содержимое</label><textarea id="new-document-content" required placeholder="Начните ввод…"></textarea></div></div><footer class="modal-actions"><button class="button" data-action="close-modal" type="button">Отмена</button><button class="button primary" type="submit">${icon("lock")} Создать и зашифровать</button></footer></form>`, true);
+  openModal(`<header class="modal-head"><div><h2>Новый защищённый документ</h2><p>Текст или файл шифруется на клиенте до сохранения.</p></div><button class="modal-close" data-action="close-modal">${icon("close")}</button></header><form id="new-document-form"><div class="modal-body"><div class="field"><label for="new-document-title">Название</label><input id="new-document-title" maxlength="120" placeholder="Можно оставить пустым при загрузке файла" /></div><div class="field"><label for="new-document-content">Текстовый документ</label><textarea id="new-document-content" placeholder="Введите текст или выберите DOCX/XLSX/PDF ниже…"></textarea></div><label class="file-drop" for="new-document-file">${icon("upload")}<span><strong>Добавить DOCX, XLSX или PDF</strong><small>Для автономного стенда — до 700 КБ; backend принимает до 100 МБ</small></span><input id="new-document-file" type="file" accept=".docx,.xlsx,.pdf,application/pdf" /></label><div id="document-error" class="result-denied"></div></div><footer class="modal-actions"><button class="button" data-action="close-modal" type="button">Отмена</button><button class="button primary" type="submit">${icon("lock")} Создать и зашифровать</button></footer></form>`, true);
 }
 
 function openCommandMenu() {
-  openModal(`<header class="modal-head"><div><h2>Быстрый переход</h2><p>Навигация и действия рабочего контура</p></div><button class="modal-close" data-action="close-modal">${icon("close")}</button></header><div class="modal-body command-menu">${[["message","chats","Открыть сообщения","Защищённые комнаты"],["file","documents","Найти документ","Внутренний viewer"],["users","team","Сотрудники","Устройства и статусы"],["shield","crypto","Проверить криптоконтур","Ключи и recovery"]].map(([ico,view,title,desc]) => `<button class="command-item" data-view="${view}"><span>${icon(ico)}</span><span><strong>${title}</strong><small>${desc}</small></span><b>→</b></button>`).join("")}</div>`);
+  openModal(`<header class="modal-head"><div><h2>Быстрый переход</h2><p>Навигация и действия рабочего контура</p></div><button class="modal-close" data-action="close-modal">${icon("close")}</button></header><div class="modal-body command-menu">${[["message","chats","Открыть сообщения","Защищённые комнаты"],["file","documents","Найти документ","DOCX / XLSX / PDF viewer"],["users","team","Сотрудники","Устройства и статусы"],["shield","crypto","Проверить криптоконтур","Ключи и recovery"],["cpu","infrastructure","Инфраструктура","NestJS и сервисы"]].map(([ico,view,title,desc]) => `<button class="command-item" data-view="${view}"><span>${icon(ico)}</span><span><strong>${title}</strong><small>${desc}</small></span><b>→</b></button>`).join("")}</div>`);
 }
 
 function openOrgMenu() {
@@ -446,11 +541,20 @@ async function sendMessage() {
   const input = document.getElementById("message-input");
   const text = input?.value.trim();
   if (!text || !state.unlocked) return;
-  state.messages.push({ id: crypto.randomUUID(), room: state.selectedRoom, author: "Алия Даулетова", initials: "АД", time: formatNow(), text, self: true });
+  const id = crypto.randomUUID();
+  state.messages.push({ id, room: state.selectedRoom, author: "Алия Даулетова", initials: "АД", time: formatNow(), text, self: true });
   await persistVault();
   await appendAudit("Сообщение отправлено", `room:${state.selectedRoom} · content omitted`);
+  let delivered = false;
+  if (state.realtime?.connected && state.backendRoomId && state.rootKeyBytes) {
+    try {
+      const envelope = await encryptXChaCha20(new TextEncoder().encode(text), state.rootKeyBytes, { tenantId: ORG_ID, roomId: state.backendRoomId, clientMessageId: id }, 1);
+      await new Promise((resolve, reject) => state.realtime.timeout(5000).emit("message:send", { roomId: state.backendRoomId, clientMessageId: id, ciphertext: envelope.ciphertext, nonce: envelope.nonce, aad: envelope.aad, keyEpoch: envelope.keyEpoch }, (error, response) => error ? reject(error) : resolve(response)));
+      delivered = true;
+    } catch { /* local encrypted queue remains available */ }
+  }
   render();
-  toast("Сообщение зашифровано", "В хранилище записан новый AES-GCM ciphertext.");
+  toast("Сообщение зашифровано", delivered ? "XChaCha20 ciphertext доставлен через Socket.IO." : "Сохранено в локальной encrypted queue; realtime сейчас недоступен.");
 }
 
 async function saveOpenDocument(docId) {
@@ -468,16 +572,155 @@ async function saveOpenDocument(docId) {
 }
 
 async function createDocument(form) {
-  const title = form.querySelector("#new-document-title").value.trim();
+  const titleInput = form.querySelector("#new-document-title").value.trim();
   const content = form.querySelector("#new-document-content").value.trim();
-  if (!title || !content) return;
-  const doc = { id: crypto.randomUUID(), title, type: "doc", status: "Черновик", statusTone: "gray", classification: "Внутренний", classificationTone: "internal", owner: "Алия Даулетова", updated: `сегодня, ${formatNow()}`, version: 1, canEdit: true, content };
+  const file = form.querySelector("#new-document-file").files[0];
+  const errorNode = form.querySelector("#document-error");
+  if (!content && !file) { errorNode.textContent = "Введите текст или выберите файл."; return; }
+  if (file && file.size > 700 * 1024) { errorNode.textContent = "На автономном стенде файл должен быть не больше 700 КБ. Backend рассчитан на 100 МБ."; return; }
+  const extension = file?.name.split(".").pop()?.toLocaleLowerCase();
+  if (file && !["docx", "xlsx", "pdf"].includes(extension)) { errorNode.textContent = "Поддерживаются только DOCX, XLSX и PDF."; return; }
+  const id = crypto.randomUUID();
+  const title = titleInput || file?.name || "Новый документ";
+  const type = extension === "pdf" ? "pdf" : extension === "xlsx" ? "sheet" : "doc";
+  const doc = { id, title, type, status: "Черновик", statusTone: "gray", classification: "Внутренний", classificationTone: "internal", owner: "Алия Даулетова", updated: `сегодня, ${formatNow()}`, version: 1, canEdit: !file, content: content || `Файл ${file.name} зашифрован на устройстве.` };
+  if (file) {
+    const fileKey = await generateContentKey();
+    doc.fileManifest = await encryptFile(file, fileKey, id);
+    doc.fileKey = toBase64(fileKey);
+    fileKey.fill(0);
+  }
   state.documents.unshift(doc);
   await persistVault();
   await appendAudit("Документ создан", `${title} · v1`);
   closeModal();
   render();
-  toast("Документ создан", "Содержимое сохранено только в зашифрованном виде.");
+  toast("Документ создан", file ? "Файл разбит на chunks и зашифрован XChaCha20‑Poly1305." : "Текст сохранён только в зашифрованном vault.");
+}
+
+async function checkBackend() {
+  state.backendStatus = "checking";
+  render();
+  try {
+    const response = await fetch(`${API_ORIGIN}/api/v1/health/ready`, { signal: AbortSignal.timeout(3500) });
+    if (!response.ok) throw new Error("not ready");
+    state.backendStatus = "ready";
+    toast("Backend готов", "NestJS, PostgreSQL и Redis прошли readiness-check.");
+  } catch {
+    state.backendStatus = "down";
+    toast("Backend не запущен", "Запустите локальный контур командой npm run infra:up.");
+  }
+  render();
+}
+
+async function backendRequest(path, options = {}) {
+  const response = await fetch(`${API_ORIGIN}/api/v1${path}`, { ...options, headers: { "Content-Type": "application/json", ...(options.headers || {}) } });
+  const body = response.status === 204 ? null : await response.json().catch(() => ({}));
+  if (!response.ok) { const error = new Error(Array.isArray(body?.message) ? body.message.join("; ") : body?.message || `HTTP ${response.status}`); error.body = body; error.status = response.status; throw error; }
+  return body;
+}
+
+async function connectBackendRealtime() {
+  if (!state.backendSession || !state.unlocked || !state.rootKeyBytes) return;
+  const backendRooms = await backendRequest("/rooms", { headers: { Authorization: `Bearer ${state.backendSession.accessToken}` } });
+  state.backendRoomId = backendRooms[0]?.id ?? null;
+  state.realtime?.disconnect();
+  state.realtime = connectRealtime(API_ORIGIN, state.backendSession.accessToken, {
+    onState: (status) => {
+      state.realtimeState = status;
+      if (state.view === "chats") render();
+    },
+    onMessage: async (message) => {
+      if (!state.rootKeyBytes || !message?.clientMessageId || state.messages.some((item) => item.id === message.clientMessageId)) return;
+      try {
+        const plaintext = await decryptXChaCha20({ version: 1, suite: "XCHACHA20-POLY1305-IETF", keyEpoch: Number(message.keyEpoch), nonce: String(message.nonce), aad: String(message.aad), ciphertext: String(message.ciphertext) }, state.rootKeyBytes);
+        state.messages.push({ id: String(message.clientMessageId), room: "board", author: "Участник realtime", initials: "RT", time: formatNow(), text: new TextDecoder().decode(plaintext), self: false });
+        plaintext.fill(0);
+        await persistVault();
+        if (state.view === "chats") render();
+      } catch { toast("Realtime payload отклонён", "AEAD-проверка входящего сообщения не пройдена."); }
+    }
+  });
+  state.realtime.on("connect", () => { if (state.backendRoomId) state.realtime.emit("room:join", { roomId: state.backendRoomId }); });
+}
+
+async function loginBackend() {
+  try {
+    state.backendSession = await backendRequest("/auth/login", { method: "POST", body: JSON.stringify({ email: "admin@astana-industrial.kz", password: DEMO_PASSPHRASE, deviceId: "kontur-demo-browser", deviceName: "Pilot browser" }) });
+    await connectBackendRealtime();
+    toast("Demo-сессия открыта", "Получены короткий access token и rotating refresh token.");
+  } catch (error) { toast("Вход не выполнен", error instanceof Error ? error.message : "Backend error"); }
+  render();
+}
+
+async function rotateBackendSession() {
+  if (!state.backendSession) return;
+  try {
+    state.backendSession = await backendRequest("/auth/refresh", { method: "POST", body: JSON.stringify({ refreshToken: state.backendSession.refreshToken }) });
+    if (state.realtime) state.realtime.auth = { token: state.backendSession.accessToken };
+    toast("Token family ротирована", "Предыдущий refresh token теперь считается использованным; повтор отзовёт всю family.");
+  } catch (error) { state.backendSession = null; toast("Ротация отклонена", error instanceof Error ? error.message : "Backend error"); }
+  render();
+}
+
+async function logoutBackend() {
+  if (!state.backendSession) return;
+  try { await backendRequest("/auth/logout", { method: "POST", body: JSON.stringify({ refreshToken: state.backendSession.refreshToken }) }); } catch { /* session is cleared locally even if the backend is unreachable */ }
+  state.realtime?.disconnect();
+  state.realtime = null;
+  state.realtimeState = "offline";
+  state.backendRoomId = null;
+  state.backendSession = null;
+  render();
+  toast("Сессия закрыта", "Refresh-token family отозвана.");
+}
+
+async function enrollPasskey() {
+  if (!state.backendSession || !window.PublicKeyCredential) { toast("Passkey недоступен", "Нужны активная admin-сессия и браузер с WebAuthn."); return; }
+  const deviceId = `kontur-passkey-${crypto.randomUUID()}`;
+  let deviceRecordId;
+  try {
+    await backendRequest("/auth/login", { method: "POST", body: JSON.stringify({ email: "admin@astana-industrial.kz", password: DEMO_PASSPHRASE, deviceId, deviceName: "WebAuthn pilot device" }) });
+  } catch (error) { deviceRecordId = error.body?.deviceRecordId; }
+  if (!deviceRecordId) { toast("Enrollment не начат", "Backend не вернул pending device record."); return; }
+  try {
+    await backendRequest(`/devices/${deviceRecordId}/approve`, { method: "POST", headers: { Authorization: `Bearer ${state.backendSession.accessToken}` } });
+    const enrollment = await backendRequest("/auth/login", { method: "POST", body: JSON.stringify({ email: "admin@astana-industrial.kz", password: DEMO_PASSPHRASE, deviceId, deviceName: "WebAuthn pilot device" }) });
+    const authHeader = { Authorization: `Bearer ${enrollment.enrollmentToken}` };
+    const optionsJSON = await backendRequest("/auth/webauthn/register/options", { method: "POST", headers: authHeader, body: "{}" });
+    const response = await startRegistration({ optionsJSON });
+    await backendRequest("/auth/webauthn/register/verify", { method: "POST", headers: authHeader, body: JSON.stringify({ response }) });
+    toast("Passkey зарегистрирован", "Direct WebAuthn attestation сохранена; устройство стало active.");
+  } catch (error) { toast("WebAuthn enrollment прерван", error instanceof Error ? error.message : "Authenticator error"); }
+}
+
+async function passkeyLogin() {
+  if (!window.PublicKeyCredential) { toast("Passkey недоступен", "Этот браузер не поддерживает WebAuthn."); return; }
+  try {
+    const optionsJSON = await backendRequest("/auth/webauthn/authenticate/options", { method: "POST", body: JSON.stringify({ email: "admin@astana-industrial.kz" }) });
+    const response = await startAuthentication({ optionsJSON });
+    state.backendSession = await backendRequest("/auth/webauthn/authenticate/verify", { method: "POST", body: JSON.stringify({ challenge: optionsJSON.challenge, response }) });
+    await connectBackendRealtime();
+    render();
+    toast("Passkey подтверждён", "Открыта device-bound сессия с rotating refresh token.");
+  } catch (error) { toast("Passkey login отклонён", error instanceof Error ? error.message : "Authenticator error"); }
+}
+
+async function openDeviceReview() {
+  if (!state.backendSession) { toast("Нужна backend-сессия", "Откройте её на странице «Инфраструктура»."); return; }
+  try {
+    const devices = await backendRequest("/devices", { headers: { Authorization: `Bearer ${state.backendSession.accessToken}` } });
+    openModal(`<header class="modal-head"><div><h2>Доверенные устройства</h2><p>Статусы читаются из PostgreSQL; approve/revoke исполняются backend и попадают в audit.</p></div><button class="modal-close" data-action="close-modal">${icon("close")}</button></header><div class="modal-body device-review-list">${devices.map((device) => `<article class="device-review-row"><span class="service-icon">${icon("fingerprint")}</span><span><strong>${escapeHTML(device.displayName)}</strong><small>${escapeHTML(device.attestationLevel)} · ${escapeHTML(device.status)}</small></span><span>${device.status === "pending" && device.attestationLevel !== "admin-approved-awaiting-webauthn" ? `<button class="button small primary" data-action="approve-device" data-id="${device.id}">Одобрить</button>` : device.status === "pending" ? `<span class="status-pill amber">Ожидает WebAuthn</span>` : device.status === "active" ? `<button class="button small" data-action="revoke-device" data-id="${device.id}">Отозвать</button>` : `<span class="status-pill gray">Отозвано</span>`}</span></article>`).join("") || `<div class="empty-state">Устройства не найдены.</div>`}</div><footer class="modal-actions"><button class="button" data-action="close-modal">Закрыть</button></footer>`, true);
+  } catch (error) { toast("Устройства не загружены", error instanceof Error ? error.message : "Backend error"); }
+}
+
+async function changeDeviceState(id, action) {
+  if (!state.backendSession) return;
+  try {
+    await backendRequest(`/devices/${id}/${action}`, { method: "POST", headers: { Authorization: `Bearer ${state.backendSession.accessToken}` } });
+    toast(action === "approve" ? "Устройство одобрено" : "Устройство отозвано", action === "revoke" ? "Сессии устройства отозваны; требуется ротация group keys." : "Устройство может завершить WebAuthn enrollment.");
+    await openDeviceReview();
+  } catch (error) { toast("Операция отклонена", error instanceof Error ? error.message : "Backend error"); }
 }
 
 async function verifyAudit() {
@@ -518,6 +761,7 @@ document.addEventListener("click", async (event) => {
     document.getElementById("sidebar").classList.remove("open");
     document.getElementById("mobile-backdrop").classList.remove("show");
     render();
+    window.scrollTo({ top: 0, behavior: "instant" });
     main.focus({ preventScroll: true });
     return;
   }
@@ -539,7 +783,16 @@ document.addEventListener("click", async (event) => {
   if (action === "close-modal") closeModal();
   if (action === "server-view") openServerView();
   if (action === "new-document") openNewDocument();
-  if (action === "open-document") openDocument(actionTarget.dataset.id);
+  if (action === "open-document") await openDocument(actionTarget.dataset.id);
+  if (action === "check-backend") await checkBackend();
+  if (action === "login-backend") await loginBackend();
+  if (action === "rotate-session") await rotateBackendSession();
+  if (action === "logout-backend") await logoutBackend();
+  if (action === "enroll-passkey") await enrollPasskey();
+  if (action === "passkey-login") await passkeyLogin();
+  if (action === "device-review") await openDeviceReview();
+  if (action === "approve-device") await changeDeviceState(actionTarget.dataset.id, "approve");
+  if (action === "revoke-device") await changeDeviceState(actionTarget.dataset.id, "revoke");
   if (action === "save-document") await saveOpenDocument(actionTarget.dataset.id);
   if (action === "verify-audit") await verifyAudit();
   if (action === "export-audit") exportAudit();
@@ -552,12 +805,16 @@ document.addEventListener("click", async (event) => {
     toast("Политика сохранена", "Изменение добавлено в append-only audit log.");
   }
   if (action === "recover-demo") {
-    await appendAudit("Recovery drill выполнен", "Organization Root Key · demo only", "Разрешено", "Recovery coordinator");
-    toast("Recovery drill завершён", "Кворум 2 из 3 подтверждён. Реальный ключ в MVP не создавался.");
+    const selectedShares = [...state.recoveryApprovals].map((holderId) => state.recoveryShares[Number(holderId.split("-")[1]) - 1]).filter(Boolean);
+    const recovered = await recoverSecret(selectedShares);
+    const valid = Boolean(state.rootKeyBytes) && recovered.length === state.rootKeyBytes.length && recovered.every((byte, index) => byte === state.rootKeyBytes[index]);
+    recovered.fill(0);
+    await appendAudit("Recovery drill выполнен", `Organization Root Key · Shamir 2-of-3 · ${valid ? "verified" : "failed"}`, valid ? "Разрешено" : "Отклонено", "Recovery coordinator");
+    toast(valid ? "Ключ восстановлен" : "Recovery не пройден", valid ? "Два реальных Shamir-share восстановили исходные 256 бит; буфер очищен." : "Полученный секрет не совпал с исходным ключом.");
   }
   if (action === "rotate-key") toast("Запрос ротации создан", "В production потребуется step-up MFA и двойное подтверждение.");
   if (["new-room", "invite-employee", "new-role"].includes(action)) toast("Сценарий отмечен для пилота", "В MVP доступен основной защищённый поток; создание сущностей подключается к backend на следующем этапе.");
-  if (["demo-call", "attachment", "room-info", "doc-menu", "employee-menu", "device-review"].includes(action)) toast("Демонстрационный режим", "Эта операция показана в интерфейсе, но не подключена к серверу в MVP.");
+  if (["demo-call", "attachment", "room-info", "doc-menu", "employee-menu"].includes(action)) toast("Демонстрационный режим", "Эта вспомогательная операция не входит в текущий security-critical pilot flow.");
 });
 
 document.addEventListener("submit", async (event) => {

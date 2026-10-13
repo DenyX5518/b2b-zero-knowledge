@@ -1,6 +1,6 @@
 # Контур: архитектура B2B/B2G zero-knowledge платформы
 
-Статус документа: целевая архитектура после MVP. Демонстрационная реализация в `dist/` намеренно уже этого проекта; различия зафиксированы в `MVP_LIMITATIONS.md`.
+Статус документа: архитектура pilot foundation. Серверная основа находится в `apps/api`, клиентские криптопримитивы — в `packages/crypto-client`, автономный UX — в `dist`; остаточные production-gaps зафиксированы в `MVP_LIMITATIONS.md`.
 
 ## 1. System architecture
 
@@ -146,9 +146,9 @@ docs/
 
 ## 15. MVP roadmap
 
-1. **Показательный MVP (эта поставка):** рабочая оболочка, локальное AES-GCM шифрование сообщений/документов, simulated tenant vault, permissions, chained audit, recovery 2-of-3 UX, server-view ciphertext.
-2. **Pilot foundation:** NestJS/PostgreSQL/MinIO, реальные accounts/devices, WebAuthn, libsodium, tenant RLS, encrypted uploads, WebSocket delivery, tests и observability.
-3. **Controlled pilot:** audited Shamir implementation/HSM flows, key rotation/revocation, CRDT documents, dual control, external penetration test, recovery drills.
+1. **Показательный MVP:** рабочая оболочка и демонстрация ciphertext-only trust boundary — завершено.
+2. **Pilot foundation (эта поставка):** NestJS/PostgreSQL/Redis/MinIO, accounts/devices, WebAuthn/OIDC, libsodium, подготовленные tenant RLS policies, encrypted uploads, WebSocket delivery, Shamir 2-of-3, encrypted Yjs и Office viewers — реализовано.
+3. **Controlled pilot:** подключение реального HSM/IdP/MDM, migration-only RLS role, dual control, WORM anchor, внешний penetration test и crypto audit.
 4. **Production/B2G:** formal threat model review, crypto audit, compliance mapping, HA/DR, signed supply chain/SBOM, on-prem/air-gap installers, ЭЦП и office bridges.
 
 Критический security gate перед pilot: протокол, key lifecycle и recovery должны пройти независимый криптографический аудит. Демонстрационный код не является таким протоколом.

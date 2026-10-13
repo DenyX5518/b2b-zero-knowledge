@@ -1,20 +1,17 @@
-# Что намеренно упрощено в показательном MVP
+# Границы текущего pilot MVP
 
-MVP нужен для демонстрации продукта и ключевых trust boundaries, а не для обработки реальных секретных данных.
+Перечисленные ранее технические пробелы закрыты кодом: backend и хранилища, WebSocket, Shamir 2‑из‑3, Argon2id/libsodium, WebAuthn/OIDC, token rotation, PKCS#11 adapter, encrypted Yjs, DOCX/XLSX/PDF viewer и trusted OnlyOffice bridge реализованы. Ниже остаются ограничения, которые требуют внешней инфраструктуры, security review или нативного endpoint-контроля.
 
-| Упрощение | Почему сейчас | Что теряем |
+| Ограничение | Чем обусловлено | Что теряем |
 |---|---|---|
-| Статическое browser-only приложение без NestJS/PostgreSQL/Redis/MinIO | позволяет показать полный UX без небезопасного «полубэкенда» | нет реальной многопользовательской синхронизации, серверного RBAC и долговременного хранилища |
-| Демо-пароль известен и PBKDF2 применяется вместо Argon2id | WebCrypto доступен без внешних зависимостей; пароль нужен лишь для демонстрации | нельзя считать vault защищённым от офлайн-перебора как production-систему |
-| AES-256-GCM вместо XChaCha20-Poly1305 | нативно поддерживается браузером | требуется строгая дисциплина nonce; нет libsodium-профиля |
-| Recovery 2-of-3 моделируется UX-сценарием | настоящий Shamir + holder devices требует протокола, provisioning и security review | shares не восстанавливают реальный ORK, нет защиты от сговора двух holders |
-| Один демонстрационный tenant | фокус на глубине сценария и изоляции namespace | нет доказанной RLS/DB-isolation и tenant migration |
-| Роли и permissions исполняются в клиенте | backend отсутствует | пользователь может изменить локальный JS; это только визуализация policy |
-| Чаты без WebSocket и других реальных клиентов | нет server runtime | нет presence, delivery/read sync, offline queue и conflict resolution |
-| Редактор документов текстовый, без CRDT/OnlyOffice/ЭЦП | интеграции существенно расширяют attack surface | нет совместного редактирования, DOCX/XLSX/PDF fidelity и юридической подписи |
-| Audit — локальная SHA-256 hash chain | показывает tamper-evident модель без сервера/WORM | владелец браузера может удалить журнал целиком; нет внешнего якорения/подписи |
-| Нет SSO, WebAuthn, device attestation и token rotation | они зависят от identity backend и устройств | нет production authentication/session security |
-| Метаданные примеров открыты в UI | важно объяснить продукт | demo не доказывает encrypted metadata policy и traffic-analysis resistance |
-| Запрет download/print демонстрируется интерфейсом | браузер не может гарантированно запретить capture | нет DLP/IRM, watermarking и endpoint enforcement |
+| Аппаратный HSM не приложен к репозиторию | PKCS#11 adapter требует реального устройства, vendor library, PIN ceremony и key provisioning | dev по умолчанию подписывает audit ephemeral Ed25519-ключом; после рестарта подписи нельзя подтвердить тем же public key |
+| SSO и hardware-backed attestation требуют IdP/устройства заказчика | issuer, client credentials, RP origin, AAGUID policy и доверенные roots индивидуальны | кодовые потоки есть, но конкретные Entra/Keycloak/Казахстанский IdP и модель TPM/Secure Enclave должны пройти интеграционный тест |
+| OnlyOffice не может одновременно быть обычным серверным редактором и zero-knowledge для владельца сервера | редактору нужен plaintext для рендеринга и преобразования форматов | полноценное редактирование доступно только в customer-controlled trusted mode; строгий ZK-режим использует локальный viewer и encrypted CRDT updates |
+| Web-приложение не может запретить фотографию экрана или OS-level capture | браузер не контролирует камеру, драйвер дисплея и скомпрометированный endpoint | watermark/print/context-menu/copy deterrence снижают случайную утечку, но не заменяют MDM/DLP, VDI, native `FLAG_SECURE` и дисциплину пользователя |
+| Криптопротокол и выбранные библиотеки ещё не прошли независимый аудит именно этой сборки | тесты подтверждают корректность сценариев, но не заменяют формальную проверку и pentest | систему нельзя использовать для государственных тайн, production key custody и юридически значимого архива до security gate |
+| RLS policies поставляются как post-schema migration, а MVP дополнительно фильтрует tenant в приложении | `DB_SYNC=true` оставлен только для быстрого пилота | перед эксплуатацией нужен migration-only режим, отдельная DB role без BYPASSRLS и автоматические cross-tenant leakage tests |
+| Нет HA/DR, WORM-якорения, SIEM и наблюдаемости production-класса | один Compose-host показывает функциональность, а не эксплуатационный кластер | отказ хоста прерывает сервис; audit chain можно проверить, но ещё нет внешнего неизменяемого якоря |
+| Демо-фраза и демо-учётная запись публичны | нужны для воспроизводимого стенда | автономный стенд нельзя использовать для реальных секретов; пилот обязан отключить `DEMO_SEED` и выполнить provisioning |
+| ЭЦП/НУЦ РК и юридические workflow не входят в этот инкремент | это отдельная нормативная интеграция, не криптография хранения | документы можно согласовывать и версионировать, но подпись не имеет юридической силы |
 
-Итог: MVP достоверно показывает продуктовые сценарии и принцип «ciphertext at rest, key in memory», но не должен использоваться с реальными коммерческими, государственными или персональными данными. Следующий шаг — Pilot foundation из `ARCHITECTURE.md`.
+Итого: это существенно более функциональный pilot foundation, а не сертифицированный production. Главные оставшиеся работы — подключить реальный IdP/HSM/MDM, включить migrations+RLS под ограниченной DB role и пройти независимый crypto/security audit.

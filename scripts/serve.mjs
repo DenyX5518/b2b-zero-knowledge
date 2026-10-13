@@ -18,7 +18,7 @@ createServer(async (request, response) => {
     response.writeHead(200, {
       "Content-Type": types[extname(resolved)] || "application/octet-stream",
       "Cache-Control": "no-store",
-      "Content-Security-Policy": "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'"
+      "Content-Security-Policy": "default-src 'self'; style-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob:; connect-src 'self' http://127.0.0.1:3001 ws://127.0.0.1:3001; frame-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
     });
     response.end(await readFile(resolved));
   } catch {

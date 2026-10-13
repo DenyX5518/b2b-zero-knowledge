@@ -1,0 +1,98 @@
+name: kontur-mvp
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: kontur
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: kontur
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kontur -d kontur"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-kontur}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-change-me-now}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:-kontur} ${MINIO_SECRET_KEY:-change-me-now} &&
+        mc mb --ignore-existing local/${MINIO_BUCKET:-kontur-ciphertext} &&
+        mc anonymous set none local/${MINIO_BUCKET:-kontur-ciphertext}
+
+  onlyoffice:
+    image: onlyoffice/documentserver:8.3
+    profiles: ["trusted-editor"]
+    environment:
+      JWT_ENABLED: "true"
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-replace-in-on-prem-deployment}
+    ports:
+      - "8082:80"
+    volumes:
+      - onlyoffice-data:/var/www/onlyoffice/Data
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    env_file: ../.env
+    environment:
+      DATABASE_URL: postgres://kontur:${POSTGRES_PASSWORD:-change-me}@postgres:5432/kontur
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: minio
+      ONLYOFFICE_URL: http://onlyoffice
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  onlyoffice-data:
