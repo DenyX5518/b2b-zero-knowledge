@@ -1,6 +1,6 @@
 # Контур: архитектура B2B/B2G zero-knowledge платформы
 
-Статус документа: архитектура pilot foundation. Серверная основа находится в `apps/api`, клиентские криптопримитивы — в `packages/crypto-client`, автономный UX — в `dist`; остаточные production-gaps зафиксированы в `MVP_LIMITATIONS.md`.
+Статус документа: архитектура pilot foundation. Серверная основа находится в `apps/api`, React-клиент — в `apps/web`, клиентские криптопримитивы — в `packages/crypto-client`, production-сборка frontend — в `dist`; остаточные production-gaps зафиксированы в `MVP_LIMITATIONS.md`.
 
 ## 1. System architecture
 
@@ -124,22 +124,20 @@ Audit содержит действия и решения доступа, но �
 
 ```text
 apps/
-  web/                 Next.js client + crypto workers
-  mobile/              React Native
+  web/                 React 19 + Vite 8 + Zustand, FSD layers
   api/                 NestJS composition root
-  realtime/            WebSocket gateway
 packages/
-  contracts/           OpenAPI/events/schema
-  crypto-protocol/     formats + wrappers over audited libraries
-  policy/              RBAC/ABAC types and evaluator
-  ui/                   design system
-modules/
-  auth/ organizations/ employees/ roles/ permissions/ devices/
-  chats/ messages/ documents/ files/ audit/ notifications/ admin/
+  crypto-client/       libsodium/WebCrypto, files, CRDT, passkeys
 infra/
-  docker/ helm/ terraform/ airgap/
-docs/
-  adr/ threat-model/ runbooks/
+  docker-compose.yml   API, PostgreSQL, Redis, MinIO, OnlyOffice profile
+
+apps/web/src/
+  app/                 composition root + Zustand store
+  pages/               route-level screens
+  widgets/             application shell
+  features/            user scenarios and modals
+  entities/            domain UI components
+  shared/              UI-kit, config, helpers and demo data
 ```
 
 Модули общаются через typed contracts и domain events. Crypto protocol имеет отдельное versioning и security review.

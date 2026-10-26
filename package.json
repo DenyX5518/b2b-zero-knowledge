@@ -10,16 +10,19 @@
   "scripts": {
     "start": "node scripts/serve.mjs",
     "dev:api": "npm run dev --workspace @kontur/api",
-    "build": "npm run build --workspaces --if-present",
-    "build:secure-runtime": "node scripts/build-secure-runtime.mjs",
+    "dev:web": "npm run dev --workspace @kontur/web",
+    "build": "npm run build --workspace @kontur/crypto-client && npm run build --workspace @kontur/api && npm run build --workspace @kontur/web",
     "test": "npm run test --workspaces --if-present",
-    "check": "node --check dist/app.js && node --check scripts/serve.mjs && npm run build",
-    "infra:up": "docker-compose --env-file .env -f infra/docker-compose.yml up -d --build",
-    "infra:down": "docker-compose --env-file .env -f infra/docker-compose.yml down"
+    "check": "node --check scripts/serve.mjs && npm run build",
+    "infra:up": "docker compose --env-file .env -f infra/docker-compose.yml up -d --build",
+    "infra:down": "docker compose --env-file .env -f infra/docker-compose.yml down"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
     "typescript": "^5.7.0",
     "vitest": "^5.0.4"
+  },
+  "overrides": {
+    "multer": "2.5.0"
   }
 }

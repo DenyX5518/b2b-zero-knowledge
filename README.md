@@ -4,6 +4,7 @@
 
 ## Что реализовано
 
+- React 19 + Vite 8 frontend с компонентной FSD-архитектурой и Zustand для состояния.
 - NestJS 11 API, Socket.IO gateway, PostgreSQL 17, Redis 8 и MinIO через Docker Compose.
 - Строгая tenant-привязка каждой сущности и каждого server-side запроса; подготовлены PostgreSQL RLS policies.
 - Access JWT на 5 минут и Argon2id-хешированные refresh tokens с rotation, reuse detection и отзывом всей token family.
@@ -16,23 +17,42 @@
 - Audit hash chain пересчитывается при проверке и подписывается ephemeral Ed25519 в dev либо PKCS#11 HSM в pilot.
 - OnlyOffice bridge только в явно включаемом customer-controlled trusted-editor режиме.
 
-## Автономный интерфейс
+## Frontend
 
 ```powershell
 npm install
-npm run build:secure-runtime
+npm run build
 npm start
 ```
 
-Откройте `http://127.0.0.1:4173`. Демо-фраза — `demo-2026`. В браузере реально выполняются Argon2id, Shamir и шифрование файлов. Для автономного режима ciphertext хранится в `localStorage`; статический стенд не отправляет plaintext наружу.
+Откройте `http://127.0.0.1:4173`. Демо-фраза — `demo-2026`. В браузере реально выполняются Argon2id, Shamir и шифрование файлов. Для автономного режима ciphertext хранится в `localStorage`; статический стенд не отправляет plaintext наружу. Подробная инструкция доступна в интерфейсе по маршруту `#/how-to`.
+
+Для разработки с Vite HMR:
+
+```powershell
+npm run dev:web
+```
+
+Frontend организован по Feature-Sliced Design:
+
+```text
+apps/web/src/
+  app/          composition root и Zustand store
+  pages/        страницы продукта
+  widgets/      Sidebar, Topbar, App Shell
+  features/     vault, documents, server ciphertext view
+  entities/     message, document, employee, service
+  shared/       UI-kit, config, router, helpers
+```
 
 ## Полный локальный контур
 
 1. Проверьте `.env` и замените все значения `change-me`.
 2. Запустите Docker daemon.
-3. Выполните:
+3. Соберите проект и поднимите Docker-контур:
 
 ```powershell
+npm run build
 npm run infra:up
 ```
 
