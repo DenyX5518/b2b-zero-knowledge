@@ -4,16 +4,20 @@
   "private": true,
   "type": "module",
   "workspaces": [
-    "apps/*",
+    "apps/api",
+    "apps/web",
     "packages/*"
   ],
   "scripts": {
+    "env:init": "node scripts/init-env.mjs",
     "start": "node scripts/serve.mjs",
     "dev:api": "npm run dev --workspace @kontur/api",
     "dev:web": "npm run dev --workspace @kontur/web",
+    "dev:mobile": "npm --prefix apps/mobile run start",
+    "mobile:doctor": "npm --prefix apps/mobile run doctor",
     "build": "npm run build --workspace @kontur/crypto-client && npm run build --workspace @kontur/api && npm run build --workspace @kontur/web",
     "test": "npm run test --workspaces --if-present",
-    "check": "node --check scripts/serve.mjs && npm run build",
+    "check": "node --check scripts/serve.mjs && node --check scripts/init-env.mjs && npm run build && npm --prefix apps/mobile run typecheck",
     "infra:up": "docker compose --env-file .env -f infra/docker-compose.yml up -d --build",
     "infra:down": "docker compose --env-file .env -f infra/docker-compose.yml down"
   },

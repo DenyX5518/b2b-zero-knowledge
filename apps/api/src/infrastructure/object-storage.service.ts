@@ -25,5 +25,9 @@ export class ObjectStorageService implements OnModuleInit {
   async putCiphertext(objectKey: string, buffer: Buffer, contentType = "application/octet-stream"): Promise<void> {
     await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: objectKey, Body: buffer, ContentLength: buffer.length, ContentType: contentType, Metadata: { plaintext: "never" } }));
   }
+  async getCiphertext(objectKey: string): Promise<Buffer> {
+    const object = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: objectKey }));
+    return Buffer.from(await object.Body!.transformToByteArray());
+  }
   async presignedCiphertext(objectKey: string, expiresSeconds = 300): Promise<string> { return getSignedUrl(this.client, new GetObjectCommand({ Bucket: this.bucket, Key: objectKey }), { expiresIn: expiresSeconds }); }
 }

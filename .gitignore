@@ -8,3 +8,4 @@ coverage/
 apps/*/dist/
 packages/*/dist/
 runtime-data/
+.claude/

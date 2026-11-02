@@ -1,5 +1,11 @@
+const timeFormat = new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Aqtau" });
+
 export function formatNow() {
-  return new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Qyzylorda" }).format(new Date());
+  return timeFormat.format(new Date());
+}
+
+export function formatTime(value) {
+  return timeFormat.format(new Date(value));
 }
 
 export function bytesToBase64(bytes) {

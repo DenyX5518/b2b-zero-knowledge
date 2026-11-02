@@ -1,3 +1,4 @@
+import { DEMO_ACCOUNT, ORG_NAME } from "../../../shared/config/constants.js";
 import { Icon } from "../../../shared/ui/Icon.jsx";
 import { PageHeading } from "../../../shared/ui/PageHeading.jsx";
 
@@ -10,17 +11,37 @@ const metrics = [
 
 const capabilities = [
   ["shield", "Argon2id + Shamir 2-из-3", "Ключи только на клиенте"],
-  ["message", "Realtime ciphertext", "NestJS Socket.IO gateway"],
+  ["message", "Realtime ciphertext", "NestJS Socket.IO gateway · веб и iPhone"],
   ["file", "Encrypted Office viewer", "Chunked XChaCha20-Poly1305"],
   ["fingerprint", "Passkeys и SSO", "WebAuthn attestation + OIDC PKCE"]
 ];
 
-export function OverviewPage({ unlocked, onUnlock, onServerView }) {
+const diagram = [
+  ["cpu", "Ваше устройство", "plaintext только в памяти"],
+  ["shield", "XChaCha20 / AES-GCM", "шифрование локально"],
+  ["database", "Инфраструктура", "хранит только ciphertext"]
+];
+
+export function OverviewPage({ unlocked, onUnlock, onServerView, navigate }) {
   return <div className="view">
-    <PageHeading eyebrow="ASTANA INDUSTRIAL GROUP" title="Добрый день, Алия" description="Единая защищённая среда для коммуникаций, документов и контролируемого доступа." />
+    <PageHeading eyebrow={`${ORG_NAME} Group`} title={`Добрый день, ${DEMO_ACCOUNT.greetingName}`} description="Единая защищённая среда для коммуникаций, документов и контролируемого доступа." />
     <section className="hero-security">
-      <div className="hero-copy"><div className="eyebrow-label">ZERO-KNOWLEDGE КОНТУР</div><h2>Ваши данные читают только те, кому вы доверяете.</h2><p>Сообщения и документы шифруются на устройстве. Инфраструктура хранит ciphertext и не владеет корпоративными ключами.</p><div className="hero-actions"><button className="button primary" onClick={unlocked ? onServerView : onUnlock}><Icon name={unlocked ? "eye" : "unlock"} /> {unlocked ? "Что видит сервер" : "Открыть демо-контур"}</button><span className="hero-status"><i />{unlocked ? "Локальный ключ активен" : "Требуется разблокировка"}</span></div></div>
-      <div className="security-diagram"><div className="diagram-node"><Icon name="cpu" /><strong>Ваше устройство</strong><small>plaintext</small></div><div className="diagram-flow">→</div><div className="diagram-node active"><Icon name="shield" /><strong>XChaCha20 / AES-GCM</strong><small>локально</small></div><div className="diagram-flow">→</div><div className="diagram-node"><Icon name="database" /><strong>Инфраструктура</strong><small>ciphertext</small></div></div>
+      <div className="hero-copy">
+        <div className="eyebrow-label">Zero-knowledge контур</div>
+        <h2>Ваши данные читают только те, кому вы доверяете.</h2>
+        <p>Сообщения и документы шифруются на устройстве. Инфраструктура хранит ciphertext и не владеет корпоративными ключами.</p>
+        <div className="hero-actions">
+          <button className="button primary" onClick={unlocked ? onServerView : onUnlock}><Icon name={unlocked ? "eye" : "unlock"} /> {unlocked ? "Что видит сервер" : "Открыть демо-контур"}</button>
+          {unlocked && <button className="button ghost" onClick={() => navigate("chats")}><Icon name="message" /> Перейти к сообщениям</button>}
+          <span className={`hero-status ${unlocked ? "on" : ""}`}><i />{unlocked ? "Локальный ключ активен" : "Требуется разблокировка"}</span>
+        </div>
+      </div>
+      <div className="security-diagram">
+        {diagram.map(([icon, title, note], index) => <div className={`diagram-node ${index === 1 ? "active" : ""}`} key={title}>
+          <span className="diagram-icon"><Icon name={icon} /></span>
+          <span><strong>{title}</strong><small>{note}</small></span>
+        </div>)}
+      </div>
     </section>
     <section className="metric-grid">{metrics.map(([label, value, icon, note]) => <article className="metric-card" key={label}><div className="metric-card-top"><span>{label}</span><span className="metric-icon"><Icon name={icon} /></span></div><strong>{value}</strong><small className="good">{note}</small></article>)}</section>
     <section className="dashboard-grid">

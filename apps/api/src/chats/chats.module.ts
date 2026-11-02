@@ -7,5 +7,5 @@ import { ChatController } from "./chat.controller.js";
 import { ChatGateway } from "./chat.gateway.js";
 import { ChatService } from "./chat.service.js";
 
-@Module({ imports: [TypeOrmModule.forFeature([MessageEntity, RoomEntity, RoomMemberEntity]), AuditModule, AuthModule], controllers: [ChatController], providers: [ChatService, ChatGateway] })
+@Module({ imports: [TypeOrmModule.forFeature([MessageEntity, RoomEntity, RoomMemberEntity]), AuditModule, AuthModule], controllers: [ChatController], providers: [ChatService, ChatGateway], exports: [ChatGateway] })
 export class ChatsModule {}

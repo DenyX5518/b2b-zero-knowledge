@@ -18,8 +18,13 @@ export class ChatGateway implements OnGatewayConnection {
       const user = await this.jwt.verifyAsync<AccessClaims>(token);
       if (user.type !== "access") throw new Error("Wrong token type");
       socket.data.user = user;
-      await socket.join(`tenant:${user.tenantId}:employee:${user.sub}`);
+      await socket.join([`tenant:${user.tenantId}`, `tenant:${user.tenantId}:employee:${user.sub}`]);
     } catch { socket.disconnect(true); }
+  }
+
+  // Широковещательные события организации (например, новая версия документа) без содержимого.
+  notifyTenant(tenantId: string, event: string, payload: Record<string, unknown>): void {
+    this.server.to(`tenant:${tenantId}`).emit(event, payload);
   }
 
   @SubscribeMessage("room:join")
@@ -28,7 +33,7 @@ export class ChatGateway implements OnGatewayConnection {
     if (!user) throw new WsException("Unauthenticated");
     await this.chats.assertMember(user, input.roomId);
     await socket.join(`tenant:${user.tenantId}:room:${input.roomId}`);
-    return { event: "room:joined", data: { roomId: input.roomId } };
+    return { roomId: input.roomId };
   }
 
   @SubscribeMessage("message:send")
@@ -37,6 +42,7 @@ export class ChatGateway implements OnGatewayConnection {
     if (!user) throw new WsException("Unauthenticated");
     const message = await this.chats.store(user, input);
     this.server.to(`tenant:${user.tenantId}:room:${input.roomId}`).emit("message:created", message);
-    return { event: "message:accepted", data: { clientMessageId: input.clientMessageId, serverMessageId: message.id } };
+    // Простой объект (без event/data) Nest отдаёт как ack — клиент узнаёт, что ciphertext сохранён.
+    return { clientMessageId: input.clientMessageId, serverMessageId: message.id };
   }
 }

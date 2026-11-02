@@ -27,11 +27,11 @@ abstract class TenantEntity {
 export class EmployeeEntity extends TenantEntity {
   @Column() email!: string;
   @Column({ name: "display_name" }) displayName!: string;
-  @Column({ name: "password_hash", nullable: true, select: false }) passwordHash!: string | null;
+  @Column({ name: "password_hash", type: "text", nullable: true, select: false }) passwordHash!: string | null;
   @Column({ type: "enum", enum: EmployeeRole, default: EmployeeRole.EMPLOYEE }) role!: EmployeeRole;
   @Column({ type: "enum", enum: EntityStatus, default: EntityStatus.PENDING }) status!: EntityStatus;
   @Column({ name: "department_id", type: "uuid", nullable: true }) departmentId!: string | null;
-  @Column({ name: "oidc_subject", nullable: true }) oidcSubject!: string | null;
+  @Column({ name: "oidc_subject", type: "text", nullable: true }) oidcSubject!: string | null;
 }
 
 @Entity("devices")
@@ -65,7 +65,7 @@ export class RefreshSessionEntity extends TenantEntity {
   @Column({ name: "rotated_at", type: "timestamptz", nullable: true }) rotatedAt!: Date | null;
   @Column({ name: "expires_at", type: "timestamptz" }) expiresAt!: Date;
   @Column({ name: "revoked_at", type: "timestamptz", nullable: true }) revokedAt!: Date | null;
-  @Column({ name: "revoke_reason", nullable: true }) revokeReason!: string | null;
+  @Column({ name: "revoke_reason", type: "text", nullable: true }) revokeReason!: string | null;
 }
 
 @Entity("rooms")

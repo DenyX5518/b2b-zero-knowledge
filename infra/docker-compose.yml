@@ -32,33 +32,32 @@ services:
       retries: 20
 
   minio:
-    image: minio/minio:latest
+    image: cgr.dev/chainguard/minio@sha256:113218d9c3d1030eb74b91facc799365d06b6a427a3b842b168163ddd07113fe
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-kontur}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-change-me-now}
+      MC_HOST_local: http://${MINIO_ACCESS_KEY:-kontur}:${MINIO_SECRET_KEY:-change-me-now}@localhost:9000
     ports:
       - "9000:9000"
       - "9001:9001"
     volumes:
       - minio-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "/usr/bin/mc", "ready", "local"]
       interval: 5s
       timeout: 3s
       retries: 20
 
   minio-init:
-    image: minio/mc:latest
+    image: cgr.dev/chainguard/minio@sha256:113218d9c3d1030eb74b91facc799365d06b6a427a3b842b168163ddd07113fe
     depends_on:
       minio:
         condition: service_healthy
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - >-
-        mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:-kontur} ${MINIO_SECRET_KEY:-change-me-now} &&
-        mc mb --ignore-existing local/${MINIO_BUCKET:-kontur-ciphertext} &&
-        mc anonymous set none local/${MINIO_BUCKET:-kontur-ciphertext}
+    environment:
+      MC_HOST_local: http://${MINIO_ACCESS_KEY:-kontur}:${MINIO_SECRET_KEY:-change-me-now}@minio:9000
+    entrypoint: ["/usr/bin/mc"]
+    command: ["mb", "--ignore-existing", "local/${MINIO_BUCKET:-kontur-ciphertext}"]
 
   onlyoffice:
     image: onlyoffice/documentserver:8.3
@@ -90,6 +89,12 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/v1/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
 volumes:
   postgres-data:

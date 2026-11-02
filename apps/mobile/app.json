@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "Контур",
+    "slug": "kontur-secure-workspace",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "platforms": [
+      "ios"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "kz.kontur.secureworkspace"
+    },
+    "plugins": [
+      "expo-secure-store"
+    ]
+  }
+}

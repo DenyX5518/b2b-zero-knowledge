@@ -125,6 +125,7 @@ Audit содержит действия и решения доступа, но �
 ```text
 apps/
   web/                 React 19 + Vite 8 + Zustand, FSD layers
+  mobile/              Expo SDK 58 + React Native 0.88, iOS client (noble crypto, Socket.IO)
   api/                 NestJS composition root
 packages/
   crypto-client/       libsodium/WebCrypto, files, CRDT, passkeys
@@ -138,6 +139,13 @@ apps/web/src/
   features/            user scenarios and modals
   entities/            domain UI components
   shared/              UI-kit, config, helpers and demo data
+
+apps/mobile/src/
+  app/                 composition root + Zustand store (vault, sync, navigation)
+  features/            unlock sheet (Argon2id / Keychain)
+  pages/               home, chats, conversation, documents, editor, security sections
+  widgets/             native bottom tab bar
+  shared/              crypto, API client, theme, UI primitives and demo data
 ```
 
 Модули общаются через typed contracts и domain events. Crypto protocol имеет отдельное versioning и security review.
